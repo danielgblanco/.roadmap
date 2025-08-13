@@ -4,7 +4,7 @@ import yaml
 import base64
 import argparse
 from pathlib import Path
-from github import Github
+from github import Github, Issue
 from gql import gql, Client
 from gql.transport.requests import RequestsHTTPTransport
 
@@ -30,9 +30,10 @@ class RoadmapManager:
         self.github_client = Github(github_token)
         self.queries = self._load_all_queries()
 
-        self.roadmap_project_node_id = self._get_project_node_id(ROADMAP_PROJECT_ORG, ROADMAP_PROJECT_ID, owner_type="user")
-        if not self.roadmap_project_node_id:
+        project_details = self._get_project_details_by_number(ROADMAP_PROJECT_ORG, ROADMAP_PROJECT_ID, owner_type="user") #TODO: remove owner_type when moving to org
+        if not project_details:
             raise Exception(f"Could not find roadmap project with ID {ROADMAP_PROJECT_ID} in org {ROADMAP_PROJECT_ORG}")
+        self.roadmap_project_node_id = project_details["id"]
 
         self.roadmap_repo = self.github_client.get_repo(ROADMAP_REPO)
         self.roadmap_fields = self._get_project_fields(self.roadmap_project_node_id)
@@ -58,116 +59,47 @@ class RoadmapManager:
         )
         return Client(transport=transport, fetch_schema_from_transport=True)
 
-    def _get_sigs_yaml(self):
+    def _get_project_details_by_number(self, owner: str, project_number: int, owner_type: str = "organization") -> dict | None:
         """
-        Gets the sigs.yml file from the community repository.
+        Gets the project details for a project from an owner and project number.
         """
-        print("Getting sigs.yml file from community repository...")
-        repo = self.github_client.get_repo(COMMUNITY_REPO)
-        content = repo.get_contents(SIGS_FILE, ref="add_roadmap_management") # TODO: Remove to get from main branch
-        return yaml.safe_load(base64.b64decode(content.content))
-
-    def _get_project_node_id(self, owner, project_number, owner_type="organization"): # TODO: Remove owner_type parameter
-        """
-        Gets the node ID (e.g. PVT_kwDOAvross4AyFM8) for a project from its project number (e.g. 143).
-        """
-        print(f"Getting node ID for project {project_number} in {owner}...")
+        print(f"Getting details for project {project_number} in {owner}...")
         if owner_type == "organization":
-            query = gql(self.queries["get_project_node_id"])
+            query = gql(self.queries["get_project_details_by_number_org"])
             variables = {"org": owner, "project_number": project_number}
             response = self.graphql_client.execute(query, variable_values=variables)
             if response and response.get("organization") and response["organization"].get("projectV2"):
-                return response["organization"]["projectV2"]["id"]
+                project_details = response["organization"]["projectV2"]
+                project_details["project_number"] = project_number
+                return project_details
         elif owner_type == "user":
-            query = gql(self.queries["get_user_project_node_id"])
+            query = gql(self.queries["get_project_details_by_number_user"])
             variables = {"login": owner, "project_number": project_number}
             response = self.graphql_client.execute(query, variable_values=variables)
             if response and response.get("user") and response["user"].get("projectV2"):
-                return response["user"]["projectV2"]["id"]
+                project_details = response["user"]["projectV2"]
+                project_details["project_number"] = project_number
+                return project_details
         return None
 
-    def _get_current_roadmap_items(self):
+    def _get_project_item_for_issue(self, issue: Issue) -> dict | None:
         """
-        Fetches all items from the roadmap project and all issues from the roadmap repository
-        that are linked to a source project. It returns a dictionary mapping project node IDs
-        to their issues and item IDs.
+        Given an issue, fetch the associated item in the roadmap project (if any).
+        Returns the raw item object, or None if not found.
+        Uses a direct GraphQL query by content (issue) node ID for efficiency.
         """
-        print("Fetching current roadmap items and issues...")
-        roadmap_items = {}
-
-        # Get all open issues from the roadmap repo and look for the project ID marker
-        print(f"Scanning all open issues in {self.roadmap_repo.full_name}...")
-        for issue in self.roadmap_repo.get_issues(state="open"):
-            if issue.body:
-                match = re.search(r"<!-- source-project-id: (.*) -->", issue.body)
-                if match:
-                    project_node_id = match.group(1)
-                    roadmap_items[project_node_id] = {"issue": issue}
-
-        print(f"Found {len(roadmap_items)} issues linked to a source project.")
-
-        # Get all items from the roadmap project to enrich the data
-        print("Fetching items from the roadmap project board...")
-        query = gql(self.queries["get_roadmap_items"])
-        has_next_page = True
-        after_cursor = None
-
-        while has_next_page:
-            variables = {"roadmap_project_node_id": self.roadmap_project_node_id, "after": after_cursor}
-            response = self.graphql_client.execute(query, variable_values=variables)
-
-            if not response.get("node") or not response["node"].get("items"):
-                break
-
-            items_data = response["node"]["items"]
-            for item in items_data.get("nodes", []):
-                # Find the corresponding issue in our map by matching the issue number and repo
-                if not item.get("content"):
-                    continue
-
-                repo_name = item["content"]["repository"]["nameWithOwner"]
-                issue_number = item["content"]["number"]
-
-                # Find the project_node_id from our existing map
-                found_project_id = None
-                for pid, data in roadmap_items.items():
-                    if data["issue"].number == issue_number and data["issue"].repository.full_name == repo_name:
-                        found_project_id = pid
-                        break
-
-                if found_project_id:
-                    # Enrich the existing entry with details from the project item
-                    roadmap_items[found_project_id].update({
-                        "item_id": item["id"],
-                        "status": item.get("status", {}).get("name") if item.get("status") else None,
-                        "start_date": item.get("startDate", {}).get("date") if item.get("startDate") else None,
-                        "target_date": item.get("targetDate", {}).get("date") if item.get("targetDate") else None,
-                        "sig": item.get("sig", {}).get("text") if item.get("sig") else None,
-                    })
-
-            page_info = items_data.get("pageInfo", {})
-            has_next_page = page_info.get("hasNextPage", False)
-            after_cursor = page_info.get("endCursor") if has_next_page else None
-
-        print(f"Found {len(roadmap_items)} total roadmap issues (from repo scan and project board).")
-        return roadmap_items
-
-    def _get_project_details(self, project_node_id, project_number=None):
-        """
-        Gets the details for a given project node ID, and includes the project number if provided.
-        """
-        print(f"Getting details for project {project_node_id}...")
-        query = gql(self.queries["get_project_details"])
-        variables = {"project_node_id": project_node_id}
+        query = gql(self.queries["get_project_item_by_issue_id"])
+        variables = {
+            "project_id": self.roadmap_project_node_id,
+            "content_id": issue.node_id,
+        }
         response = self.graphql_client.execute(query, variable_values=variables)
-        details = response.get("node")
-        if details and project_number is not None:
-            details["project_number"] = project_number
-        return details
+        return response.get("node", {}).get("projectV2ItemByContent")
 
-    def _get_project_fields(self, project_node_id):
+    def _get_project_fields(self, project_node_id: str) -> dict:
         """
         Get the custom fields (e.g. status, start date, etc.) and their options for a project.
+        Note: GraphQL query returns a maximum of 100 fields, which is sufficient for our use case.
         """
         query = gql(self.queries["get_project_fields"])
         variables = {"project_node_id": project_node_id}
@@ -181,7 +113,7 @@ class RoadmapManager:
                 fields[field["name"]] = field_data
         return fields
 
-    def _create_or_update_issue(self, project_details, issue=None):
+    def _create_or_update_issue(self, project_details: dict, issue: Issue = None) -> Issue | None:
         """
         Creates or updates an issue for a given project.
         """
@@ -222,26 +154,25 @@ class RoadmapManager:
                 print(f"Created issue for project {project_details['title']}")
         return issue
 
-    def _add_issue_to_roadmap_project(self, issue, project_details, item_id=None):
+    def _add_issue_to_roadmap_project(self, issue: Issue, project_details: dict) -> dict | None:
         """
-        Adds an issue to the roadmap project if it's not already there, and returns the item ID within the project.
+        Adds an issue to the roadmap project if it's not already there, and returns the project item details.
         """
-        if not item_id:
-            if self.dry_run:
-                print(f"[DRY RUN] Would add issue for project {project_details['title']} to roadmap project.")
-                return None
-            else:
-                query = gql(self.queries["add_project_v2_item_by_id"])
-                variables = {"project_id": self.roadmap_project_node_id, "content_id": issue.node_id}
-                response_add = self.graphql_client.execute(query, variable_values=variables)
-                item_id = response_add["addProjectV2ItemById"]["item"]["id"]
-                print(f"Added issue for project {project_details['title']} to roadmap project.")
-        return item_id
+        if self.dry_run:
+            print(f"[DRY RUN] Would add issue for project {project_details['title']} to roadmap project.")
+            return None
+        else:
+            query = gql(self.queries["add_project_item_by_issue_id"])
+            variables = {"project_id": self.roadmap_project_node_id, "content_id": issue.node_id}
+            response_add = self.graphql_client.execute(query, variable_values=variables)
+            print(f"Added issue for project {project_details['title']} to roadmap project.")
+            return response_add["addProjectV2ItemById"]["item"]
 
-    def _update_roadmap_fields(self, item_id, project_details, sig_name, existing_item_details=None):
+    def _update_roadmap_fields(self, project_item_details: dict, project_details: dict, sig_name: str) -> None:
         """
         Updates the custom fields in the roadmap project for a given item.
         """
+        item_id = project_item_details["id"]
         status_field = self.roadmap_fields.get("Status")
         start_date_field = self.roadmap_fields.get("Start date")
         target_date_field = self.roadmap_fields.get("Target date")
@@ -264,15 +195,20 @@ class RoadmapManager:
                 else:
                     print(f"Warning: Unknown status '{api_status}' received from API for project {project_details.get('id')}.")
 
-        if existing_item_details:
-            if all([
-                existing_item_details.get("status") == human_readable_status,
-                existing_item_details.get("start_date") == latest_status_update.get("startDate"),
-                existing_item_details.get("target_date") == latest_status_update.get("targetDate"),
-                existing_item_details.get("sig") == sig_name,
-            ]):
-                print(f"No changes to roadmap fields for item {item_id}")
-                return
+        # Extract current values from the project item details
+        current_status = project_item_details.get("status", {}).get("name") if project_item_details.get("status") else None
+        current_start_date = project_item_details.get("startDate", {}).get("date") if project_item_details.get("startDate") else None
+        current_target_date = project_item_details.get("targetDate", {}).get("date") if project_item_details.get("targetDate") else None
+        current_sig = project_item_details.get("sig", {}).get("text") if project_item_details.get("sig") else None
+
+        if all([
+            current_status == human_readable_status,
+            current_start_date == latest_status_update.get("startDate"),
+            current_target_date == latest_status_update.get("targetDate"),
+            current_sig == sig_name,
+        ]):
+            print(f"No changes to roadmap fields for item {item_id}")
+            return
 
         variables = {
             "projectId": self.roadmap_project_node_id,
@@ -295,45 +231,123 @@ class RoadmapManager:
         self.graphql_client.execute(query, variable_values=variables)
         print(f"Updated fields for item {item_id}.")
 
-    def _sync_project(self, project_node_id, project_number, current_roadmap_items, sig_name, issue=None):
+    def _sync_project(self, project_details: dict, sig_name: str, issue: Issue = None) -> None:
         """
         Syncs a project to an issue in the roadmap repository.
         """
-        print(f"Syncing project {project_node_id} to roadmap...")
-        project_details = self._get_project_details(project_node_id, project_number)
-        if not project_details:
-            print(f"Could not get details for project {project_node_id}")
-            return
-        print(f"Found project '{project_details['title']}' for node ID {project_node_id}")
+        print(f"Syncing project '{project_details['title']}' to roadmap...")
 
         issue = self._create_or_update_issue(project_details, issue)
         if not issue:
             print(f"Could not get create or update issue for project {project_details['title']}")
             return
 
-        existing_item_details = current_roadmap_items.get(project_node_id)
-        item_id = self._add_issue_to_roadmap_project(issue, project_details, existing_item_details.get("item_id") if existing_item_details else None)
-        if not item_id:
-            print(f"Could not get add issue {issue.id} to roadmap project")
-            return
+        # Fetch the project item and its fields for this issue (these are details stored in the roadmap project,
+        # not in the project itself so we need to get them separately)
+        project_item_details = self._get_project_item_for_issue(issue)
 
-        self._update_roadmap_fields(item_id, project_details, sig_name, existing_item_details)
+        # If project item details are not found, we need to add the issue to the roadmap project
+        if not project_item_details:
+            project_item_details = self._add_issue_to_roadmap_project(issue, project_details)
+            if not project_item_details:
+                print(f"Could not add issue {issue.id} to roadmap project")
+                return
 
-    def _handle_removed_projects(self, active_project_node_ids, current_roadmap_items):
+        self._update_roadmap_fields(project_item_details, project_details, sig_name)
+
+    def get_current_roadmap_issues(self) -> dict:
+        """
+        Fetches all issues from the roadmap repository that are linked to a source project.
+        Returns a dictionary mapping project node IDs to their issues.
+        """
+        print("Fetching current roadmap issues...")
+        roadmap_items = {}
+        for issue in self.roadmap_repo.get_issues(state="open"):
+            if issue.body:
+                match = re.search(r"<!-- source-project-id: (.*) -->", issue.body)
+                if match:
+                    project_node_id = match.group(1)
+                    roadmap_items[project_node_id] = {"issue": issue}
+        print(f"Found {len(roadmap_items)} issues linked to a source project.")
+        return roadmap_items
+
+    def get_roadmap_project_items(self) -> list:
+        """
+        Fetches all items from the roadmap project.
+        """
+        print("Fetching roadmap project items...")
+        query = gql(self.queries["get_roadmap_items"])
+        variables = {"project_node_id": self.roadmap_project_node_id}
+        response = self.graphql_client.execute(query, variable_values=variables)
+        if response.get("node") and response["node"].get("items"):
+            return response["node"]["items"]["nodes"]
+        return []
+
+    def get_sigs_projects(self) -> dict[str, list[dict]]:
+        """
+        Gets the sigs.yml file from the community repository and returns a dictionary of SIGs and their project details.
+        """
+        print("Getting sigs.yml file from community repository...")
+        repo = self.github_client.get_repo(COMMUNITY_REPO)
+        content = repo.get_contents(SIGS_FILE, ref="add_roadmap_management")  # TODO: Remove to get from main branch
+        sigs_yaml = yaml.safe_load(base64.b64decode(content.content))
+
+        sigs_projects = {}
+        for sig_group in sigs_yaml:
+            for sig in sig_group.get("sigs", []):
+                sig_name = sig.get("name")
+                project_details_list = []
+                for project_number in sig.get("roadmapProjectIDs", []):
+                    if not project_number:
+                        continue
+
+                    project_details = self._get_project_details_by_number(SOURCE_PROJECTS_ORG, project_number)
+                    if not project_details:
+                        print(f"Could not find project with ID {project_number} in org {SOURCE_PROJECTS_ORG}")
+                        continue
+                    project_details_list.append(project_details)
+
+                if sig_name and project_details_list:
+                    sigs_projects[sig_name] = project_details_list
+        return sigs_projects
+
+    def sync_projects_from_sigs(self, sigs_projects: dict[str, list[dict]], current_roadmap_issues: dict) -> None:
+        """
+        Syncs all projects from sigs.yml to the roadmap.
+        """
+        print("Syncing projects from sigs.yml...")
+        for sig_name, project_details_list in sigs_projects.items():
+            for project_details in project_details_list:
+                project_node_id = project_details["id"]
+                existing_issue = current_roadmap_issues.get(project_node_id, {}).get("issue")
+                self._sync_project(project_details, sig_name, existing_issue)
+
+    def handle_removed_projects(self, sigs_projects: dict[str, list[dict]]) -> None:
         """
         Removes items from the roadmap project if they are no longer in sigs.yml.
+        Please note that this will not delete or close the issues themselves, only the project items on the board.
         """
         print("Checking for removed projects...")
+        active_project_node_ids = set()
+        for project_details_list in sigs_projects.values():
+            for project_details in project_details_list:
+                active_project_node_ids.add(project_details["id"])
+
+        roadmap_items = self.get_roadmap_project_items()
         items_to_remove = []
-        for project_node_id, data in current_roadmap_items.items():
-            if project_node_id not in active_project_node_ids:
-                items_to_remove.append((data["item_id"], data["issue"].html_url))
+        for item in roadmap_items:
+            if item.get("content") and item["content"].get("body"):
+                match = re.search(r"<!-- source-project-id: (.*) -->", item["content"]["body"])
+                if match:
+                    project_node_id = match.group(1)
+                    if project_node_id not in active_project_node_ids:
+                        items_to_remove.append((item["id"], item["content"]["url"]))
 
         if not items_to_remove:
             print("No projects to remove.")
             return
 
-        delete_query = gql(self.queries["delete_project_v2_item"])
+        delete_query = gql(self.queries["delete_project_item_by_item_id"])
         for item_id, issue_url in items_to_remove:
             if self.dry_run:
                 print(f"[DRY RUN] Would remove item {item_id} (for issue {issue_url}) from roadmap project.")
@@ -341,39 +355,6 @@ class RoadmapManager:
                 delete_variables = {"project_id": self.roadmap_project_node_id, "item_id": item_id}
                 self.graphql_client.execute(delete_query, variable_values=delete_variables)
                 print(f"Removed item {item_id} (for issue {issue_url}) from roadmap project.")
-
-    def _sync_projects_from_sigs(self, sigs_yaml, current_roadmap_items):
-        """
-        Syncs all projects from sigs.yml to the roadmap.
-        """
-        print("Syncing projects from sigs.yml...")
-        active_project_node_ids = []
-        for sig_group in sigs_yaml:
-            for sig in sig_group.get("sigs", []):
-                sig_name = sig.get("name")
-                for project_number in sig.get("roadmapProjectIDs", []):
-                    if not project_number:
-                        continue
-
-                    project_node_id = self._get_project_node_id(SOURCE_PROJECTS_ORG, project_number)
-                    if not project_node_id:
-                        print(f"Could not find project with ID {project_number} in org {SOURCE_PROJECTS_ORG}")
-                        continue
-
-                    active_project_node_ids.append(project_node_id)
-                    existing_issue = current_roadmap_items.get(project_node_id, {}).get("issue")
-                    self._sync_project(project_node_id, project_number, current_roadmap_items, sig_name, existing_issue)
-
-        self._handle_removed_projects(active_project_node_ids, current_roadmap_items)
-
-    def sync(self):
-        """
-        Main sync function.
-        """
-        sigs_yaml = self._get_sigs_yaml()
-        current_roadmap_items = self._get_current_roadmap_items()
-        self._sync_projects_from_sigs(sigs_yaml, current_roadmap_items)
-
 
 def main():
     """
@@ -390,7 +371,10 @@ def main():
 
     try:
         manager = RoadmapManager(github_token, args.dry_run)
-        manager.sync()
+        sigs_projects = manager.get_sigs_projects()
+        current_roadmap_issues = manager.get_current_roadmap_issues()
+        manager.sync_projects_from_sigs(sigs_projects, current_roadmap_issues)
+        manager.handle_removed_projects(sigs_projects)
     except Exception as e:
         print(f"An error occurred: {e}")
 

@@ -1,0 +1,30 @@
+query($project_id: ID!, $content_id: ID!) {
+  node(id: $project_id) {
+    ... on ProjectV2 {
+      projectV2ItemByContent(contentId: $content_id) {
+        id
+        status: fieldValueByName(name: "Status") {
+          ... on ProjectV2ItemFieldSingleSelectValue {
+            name
+          }
+        }
+        startDate: fieldValueByName(name: "Start date") {
+          ... on ProjectV2ItemFieldDateValue {
+            date
+          }
+        }
+        targetDate: fieldValueByName(name: "Target date") {
+          ... on ProjectV2ItemFieldDateValue {
+            date
+          }
+        }
+        sig: fieldValueByName(name: "SIG") {
+          ... on ProjectV2ItemFieldTextValue {
+            text
+          }
+        }
+      }
+    }
+  }
+}
+

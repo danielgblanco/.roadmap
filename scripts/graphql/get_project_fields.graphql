@@ -1,7 +1,7 @@
 query($project_node_id: ID!) {
   node(id: $project_node_id) {
     ... on ProjectV2 {
-      fields(first: 20) {
+      fields(first: 100) {
         nodes {
           __typename
           ... on ProjectV2Field {
