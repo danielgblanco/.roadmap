@@ -23,6 +23,5 @@ jobs:
       - name: Run script
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          ROADMAP_PROJECT_ID: ${{ secrets.ROADMAP_PROJECT_ID }}
         run: python scripts/sync_roadmap.py
 
