@@ -17,11 +17,6 @@ query($roadmap_project_node_id: ID!, $after: String) {
               }
             }
           }
-          fieldValueByName(name: "Project ID") {
-            ... on ProjectV2ItemFieldTextValue {
-              text
-            }
-          }
           status: fieldValueByName(name: "Status") {
             ... on ProjectV2ItemFieldSingleSelectValue {
               name
