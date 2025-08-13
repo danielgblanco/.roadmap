@@ -1,7 +1,11 @@
-query($roadmap_project_node_id: ID!) {
+query($roadmap_project_node_id: ID!, $after: String) {
   node(id: $roadmap_project_node_id) {
     ... on ProjectV2 {
-      items(first: 100) {
+      items(first: 100, after: $after) {
+        pageInfo {
+          hasNextPage
+          endCursor
+        }
         nodes {
           id
           content {
@@ -18,9 +22,28 @@ query($roadmap_project_node_id: ID!) {
               text
             }
           }
+          status: fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
+          }
+          startDate: fieldValueByName(name: "Start date") {
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          targetDate: fieldValueByName(name: "Target date") {
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          sig: fieldValueByName(name: "SIG") {
+            ... on ProjectV2ItemFieldTextValue {
+              text
+            }
+          }
         }
       }
     }
   }
 }
-

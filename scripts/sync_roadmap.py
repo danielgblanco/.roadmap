@@ -113,7 +113,14 @@ class RoadmapManager:
                     try:
                         repo = self.github_client.get_repo(repo_name)
                         issue = repo.get_issue(issue_number)
-                        roadmap_items[project_node_id] = {"issue": issue, "item_id": item["id"]}
+                        roadmap_items[project_node_id] = {
+                            "issue": issue,
+                            "item_id": item["id"],
+                            "status": item.get("status", {}).get("name") if item.get("status") else None,
+                            "start_date": item.get("startDate", {}).get("date") if item.get("startDate") else None,
+                            "target_date": item.get("targetDate", {}).get("date") if item.get("targetDate") else None,
+                            "sig": item.get("sig", {}).get("text") if item.get("sig") else None,
+                        }
                     except Exception as e:
                         print(f"Could not fetch issue {repo_name}#{issue_number}. It might be inaccessible. Error: {e}")
 
@@ -165,6 +172,10 @@ class RoadmapManager:
         issue_body = f"{short_description}\n\n---\n\n{readme}"
 
         if issue:
+            if issue.title == issue_title and issue.body == issue_body:
+                print(f"No changes to issue for project {project_details['title']}")
+                return issue
+
             if self.dry_run:
                 print(f"[DRY RUN] Would update issue for project {project_details['title']} in {self.roadmap_repo.full_name}")
             else:
@@ -195,7 +206,7 @@ class RoadmapManager:
                 print(f"Added issue for project {project_details['title']} to roadmap project.")
         return item_id
 
-    def _update_roadmap_fields(self, item_id, project_details, sig_name):
+    def _update_roadmap_fields(self, item_id, project_details, sig_name, existing_item_details=None):
         """
         Updates the custom fields in the roadmap project for a given item.
         """
@@ -207,6 +218,7 @@ class RoadmapManager:
 
         latest_status_update = {}
         status_option_id = None
+        human_readable_status = None
         latest_status_update_nodes = project_details.get("latestStatusUpdate", {}).get("nodes", [{}])
         if len(latest_status_update_nodes) > 0:
             latest_status_update = latest_status_update_nodes[0]
@@ -220,6 +232,16 @@ class RoadmapManager:
                         print(f"Warning: Status '{human_readable_status}' not found in roadmap project options.")
                 else:
                     print(f"Warning: Unknown status '{api_status}' received from API for project {project_details.get('id')}.")
+
+        if existing_item_details:
+            if all([
+                existing_item_details.get("status") == human_readable_status,
+                existing_item_details.get("start_date") == latest_status_update.get("startDate"),
+                existing_item_details.get("target_date") == latest_status_update.get("targetDate"),
+                existing_item_details.get("sig") == sig_name,
+            ]):
+                print(f"No changes to roadmap fields for item {item_id}")
+                return
 
         variables = {
             "projectId": self.roadmap_project_node_id,
@@ -260,12 +282,13 @@ class RoadmapManager:
             print(f"Could not get create or update issue for project {project_details['title']}")
             return
 
-        item_id = self._add_issue_to_roadmap_project(issue, project_details, current_roadmap_items.get(project_node_id, {}).get("item_id"))
+        existing_item_details = current_roadmap_items.get(project_node_id)
+        item_id = self._add_issue_to_roadmap_project(issue, project_details, existing_item_details.get("item_id") if existing_item_details else None)
         if not item_id:
             print(f"Could not get add issue {issue.id} to roadmap project")
             return
 
-        self._update_roadmap_fields(item_id, project_details, sig_name)
+        self._update_roadmap_fields(item_id, project_details, sig_name, existing_item_details)
 
     def _handle_removed_projects(self, active_project_node_ids, current_roadmap_items):
         """
