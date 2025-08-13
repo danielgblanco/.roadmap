@@ -1,8 +1,6 @@
 mutation updateProjectV2ItemFields(
   $projectId: ID!
   $itemId: ID!
-  $projectIdFieldId: ID!
-  $projectIdValue: String
   $statusFieldId: ID!
   $statusValue: String
   $startDateFieldId: ID!
@@ -12,18 +10,6 @@ mutation updateProjectV2ItemFields(
   $sigFieldId: ID!
   $sigValue: String
 ) {
-  updateProjectId: updateProjectV2ItemFieldValue(
-    input: {
-      projectId: $projectId
-      itemId: $itemId
-      fieldId: $projectIdFieldId
-      value: { text: $projectIdValue }
-    }
-  ) {
-    projectV2Item {
-      id
-    }
-  }
   updateStatus: updateProjectV2ItemFieldValue(
     input: {
       projectId: $projectId

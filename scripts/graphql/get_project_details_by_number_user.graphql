@@ -5,25 +5,11 @@ query GetUserProjectDetailsByNumber($login: String!, $project_number: Int!) {
             title
             shortDescription
             readme
-            latestStatusUpdate: items(first: 1, orderBy: {field: UPDATED_AT, direction: DESC}) {
+            latestStatusUpdate: statusUpdates(first: 1, orderBy: {field: CREATED_AT, direction: DESC}) {
                 nodes {
-                    ... on ProjectV2Item {
-                        status: fieldValueByName(name: "Status") {
-                            ... on ProjectV2ItemFieldSingleSelectValue {
-                                name
-                            }
-                        }
-                        startDate: fieldValueByName(name: "Start date") {
-                            ... on ProjectV2ItemFieldDateValue {
-                                date
-                            }
-                        }
-                        targetDate: fieldValueByName(name: "Target date") {
-                            ... on ProjectV2ItemFieldDateValue {
-                                date
-                            }
-                        }
-                    }
+                    status
+                    startDate
+                    targetDate
                 }
             }
         }

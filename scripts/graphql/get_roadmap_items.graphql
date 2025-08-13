@@ -12,6 +12,7 @@ query($roadmap_project_node_id: ID!, $after: String) {
             ... on Issue {
               id
               number
+              body
               repository {
                 nameWithOwner
               }

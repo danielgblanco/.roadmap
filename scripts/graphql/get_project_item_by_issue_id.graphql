@@ -1,30 +1,34 @@
-query($project_id: ID!, $content_id: ID!) {
-  node(id: $project_id) {
-    ... on ProjectV2 {
-      projectV2ItemByContent(contentId: $content_id) {
-        id
-        status: fieldValueByName(name: "Status") {
-          ... on ProjectV2ItemFieldSingleSelectValue {
-            name
+query($content_id: ID!) {
+  node(id: $content_id) {
+    ... on Issue {
+      projectItems(first: 10) {
+        nodes {
+          id
+          project {
+            id
           }
-        }
-        startDate: fieldValueByName(name: "Start date") {
-          ... on ProjectV2ItemFieldDateValue {
-            date
+          status: fieldValueByName(name: "Status") {
+            ... on ProjectV2ItemFieldSingleSelectValue {
+              name
+            }
           }
-        }
-        targetDate: fieldValueByName(name: "Target date") {
-          ... on ProjectV2ItemFieldDateValue {
-            date
+          startDate: fieldValueByName(name: "Start date") {
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
           }
-        }
-        sig: fieldValueByName(name: "SIG") {
-          ... on ProjectV2ItemFieldTextValue {
-            text
+          targetDate: fieldValueByName(name: "Target date") {
+            ... on ProjectV2ItemFieldDateValue {
+              date
+            }
+          }
+          sig: fieldValueByName(name: "SIG") {
+            ... on ProjectV2ItemFieldTextValue {
+              text
+            }
           }
         }
       }
     }
   }
 }
-
