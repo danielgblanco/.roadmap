@@ -26,8 +26,9 @@ CONFIG = {
     },
 }
 
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logging.getLogger("gql").setLevel(logging.WARNING)
+
 
 class RoadmapManager:
     def __init__(self, github_token: str, dry_run: bool = False):
@@ -67,10 +68,12 @@ class RoadmapManager:
     @staticmethod
     def _build_issue_body(project_details: dict) -> str:
         """Constructs the body for a roadmap issue."""
-        short_description = project_details.get('shortDescription') or "No short description provided."
-        readme = project_details.get('readme') or "No README provided."
+        short_description = project_details.get("shortDescription") or "No short description provided."
+        readme = project_details.get("readme") or "No README provided."
         project_id_comment = f"<!-- source-project-id: {project_details['id']} -->"
-        source_project_url = f"https://github.com/orgs/{CONFIG['SOURCE_PROJECTS_ORG']}/projects/{project_details['project_number']}"
+        source_project_url = (
+            f"https://github.com/orgs/{CONFIG['SOURCE_PROJECTS_ORG']}/projects/{project_details['project_number']}"
+        )
 
         return (
             f"## {source_project_url}\n\n"
@@ -95,7 +98,9 @@ class RoadmapManager:
                 return item
         return None
 
-    def _get_project_details_by_number(self, owner: str, project_number: int, owner_type: str = "organization") -> dict | None:
+    def _get_project_details_by_number(
+        self, owner: str, project_number: int, owner_type: str = "organization"
+    ) -> dict | None:
         """Gets the project details for a project from an owner and project number."""
         logging.info(f"Getting details for project {project_number} in {owner}...")
         query_name = f"get_project_details_by_number_{owner_type}"
@@ -135,7 +140,7 @@ class RoadmapManager:
 
     def _create_or_update_issue(self, project_details: dict, issue: "Issue | None" = None) -> "Issue | None":
         """Creates or updates an issue for a given project."""
-        issue_title = project_details['title']
+        issue_title = project_details["title"]
         issue_body = self._build_issue_body(project_details)
 
         if issue:
@@ -179,24 +184,45 @@ class RoadmapManager:
         latest_status_update = status_updates[0] if status_updates else {}
         api_status = latest_status_update.get("status")
         human_readable_status = CONFIG["STATUS_TO_FIELD_MAP"].get(api_status)
-        status_option_id = self.roadmap_fields["Status"]["options"].get(human_readable_status) if human_readable_status else None
+        status_option_id = (
+            self.roadmap_fields["Status"]["options"].get(human_readable_status) if human_readable_status else None
+        )
 
         # Check if an update is needed
-        if all([
-            human_readable_status == project_item_details["status"]["name"] if project_item_details.get("status") else None,
-            latest_status_update.get("startDate") == project_item_details["startDate"]["date"] if project_item_details.get("startDate") else None,
-            latest_status_update.get("targetDate") == project_item_details["targetDate"]["date"] if project_item_details.get("targetDate") else None,
-            sig_name == project_item_details["sig"]["text"] if project_item_details.get("sig") else None,
-        ]):
+        if all(
+            [
+                (
+                    human_readable_status == project_item_details["status"]["name"]
+                    if project_item_details.get("status")
+                    else None
+                ),
+                (
+                    latest_status_update.get("startDate") == project_item_details["startDate"]["date"]
+                    if project_item_details.get("startDate")
+                    else None
+                ),
+                (
+                    latest_status_update.get("targetDate") == project_item_details["targetDate"]["date"]
+                    if project_item_details.get("targetDate")
+                    else None
+                ),
+                sig_name == project_item_details["sig"]["text"] if project_item_details.get("sig") else None,
+            ]
+        ):
             logging.info(f"No changes to roadmap fields for item {project_item_details["id"]}")
             return
 
         variables = {
-            "projectId": self.roadmap_project_node_id, "itemId": project_item_details["id"],
-            "statusFieldId": self.roadmap_fields["Status"]["id"], "statusValue": status_option_id,
-            "startDateFieldId": self.roadmap_fields["Start date"]["id"], "startDateValue": latest_status_update.get("startDate"),
-            "targetDateFieldId": self.roadmap_fields["Target date"]["id"], "targetDateValue": latest_status_update.get("targetDate"),
-            "sigFieldId": self.roadmap_fields["SIG"]["id"], "sigValue": sig_name,
+            "projectId": self.roadmap_project_node_id,
+            "itemId": project_item_details["id"],
+            "statusFieldId": self.roadmap_fields["Status"]["id"],
+            "statusValue": status_option_id,
+            "startDateFieldId": self.roadmap_fields["Start date"]["id"],
+            "startDateValue": latest_status_update.get("startDate"),
+            "targetDateFieldId": self.roadmap_fields["Target date"]["id"],
+            "targetDateValue": latest_status_update.get("targetDate"),
+            "sigFieldId": self.roadmap_fields["SIG"]["id"],
+            "sigValue": sig_name,
         }
 
         if self.dry_run:
@@ -207,7 +233,9 @@ class RoadmapManager:
         self.graphql_client.execute(query, variable_values=variables)
         logging.info(f"Updated fields for item {project_item_details["id"]}.")
 
-    def _sync_project(self, project_details: dict, roadmap_items: list, sig_name: str, issue: "Issue | None" = None) -> None:
+    def _sync_project(
+        self, project_details: dict, roadmap_items: list, sig_name: str, issue: "Issue | None" = None
+    ) -> None:
         """Syncs a single project to an issue in the roadmap repository."""
         logging.info(f"Syncing project '{project_details['title']}' to roadmap...")
         issue = self._create_or_update_issue(project_details, issue)
@@ -234,16 +262,22 @@ class RoadmapManager:
                 sig_name = sig.get("name")
                 project_details_list = []
                 for project_number in sig.get("roadmapProjectIDs", []):
-                    if project_number and (details := self._get_project_details_by_number(CONFIG["SOURCE_PROJECTS_ORG"], project_number)):
+                    if project_number and (
+                        details := self._get_project_details_by_number(CONFIG["SOURCE_PROJECTS_ORG"], project_number)
+                    ):
                         project_details_list.append(details)
                     else:
-                        logging.warning(f"Could not find project with ID {project_number} in org {CONFIG['SOURCE_PROJECTS_ORG']}")
+                        logging.warning(
+                            f"Could not find project with ID {project_number} in org {CONFIG['SOURCE_PROJECTS_ORG']}"
+                        )
 
                 if sig_name and project_details_list:
                     sigs_projects[sig_name] = project_details_list
         return sigs_projects
 
-    def sync_projects_from_sigs(self, sigs_projects: dict[str, list[dict]], roadmap_issues: dict, roadmap_items: list) -> None:
+    def sync_projects_from_sigs(
+        self, sigs_projects: dict[str, list[dict]], roadmap_issues: dict, roadmap_items: list
+    ) -> None:
         """Syncs all projects from sigs.yml to the roadmap."""
         logging.info("Syncing projects from sigs.yml...")
         for sig_name, project_details_list in sigs_projects.items():
@@ -256,9 +290,7 @@ class RoadmapManager:
         """Removes items from the roadmap project if they are no longer in sigs.yml.
         Returns the remaining, active items."""
         logging.info("Checking for removed projects...")
-        active_project_node_ids = {
-            details["id"] for projects in sigs_projects.values() for details in projects
-        }
+        active_project_node_ids = {details["id"] for projects in sigs_projects.values() for details in projects}
 
         items_to_remove = []
         items_to_keep = []
@@ -305,6 +337,7 @@ class RoadmapManager:
             after_cursor = item_data["pageInfo"]["endCursor"]
 
         return items
+
 
 def main():
     """Main function."""
