@@ -1,0 +1,26 @@
+query($roadmap_project_node_id: ID!) {
+  node(id: $roadmap_project_node_id) {
+    ... on ProjectV2 {
+      items(first: 100) {
+        nodes {
+          id
+          content {
+            ... on Issue {
+              id
+              number
+              repository {
+                nameWithOwner
+              }
+            }
+          }
+          fieldValueByName(name: "Project ID") {
+            ... on ProjectV2ItemFieldTextValue {
+              text
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

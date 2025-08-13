@@ -1,0 +1,19 @@
+query($project_node_id: ID!) {
+  node(id: $project_node_id) {
+    ... on ProjectV2 {
+      id
+      title
+      readme
+      shortDescription
+      updatedAt
+      public
+      latestStatusUpdate: statusUpdates(first: 1) {
+        nodes {
+          status
+          startDate
+          targetDate
+        }
+      }
+    }
+  }
+}
