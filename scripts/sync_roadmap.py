@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import yaml
 import base64
 import argparse
@@ -347,7 +348,7 @@ def main():
 
     if not (github_token := os.environ.get("GH_TOKEN")):
         logging.error("GH_TOKEN environment variable is not set")
-        return
+        sys.exit(1)
 
     try:
         manager = RoadmapManager(github_token, args.dry_run)
@@ -360,6 +361,7 @@ def main():
         manager.sync_projects_from_sigs(sigs_projects, roadmap_issues, active_roadmap_items)
     except Exception as e:
         logging.exception(f"An unexpected error occurred: {e}")
+        sys.exit(1)
 
 
 if __name__ == "__main__":
